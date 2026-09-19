@@ -7,6 +7,7 @@
 const assert = require('assert')
 const { createSerializer } = require('bedrock-protocol/src/transforms/serializer')
 const injectInteract = require('../../lib/bedrock_plugins/interact')
+const registryLoader = require('prismarine-registry')
 const { bedrockTestedVersions } = require('../../lib/version')
 
 function makeBot () {
@@ -69,6 +70,25 @@ for (const version of bedrockTestedVersions) {
       bot.useOn(bot.entities[5])
       assert.strictEqual(sent[0].params.transaction.transaction_data.action_type, 'interact')
       sent.forEach(check)
+    })
+
+    it('placeBlock emits a serializable click_block with empty actions', async function () {
+      const { Vec3 } = require('vec3')
+      const { bot, sent } = makeBot()
+      bot.registry = registryLoader('bedrock_' + version)
+      bot.quickBarSlot = 0
+      bot.heldItem = { name: 'dirt', type: 3, count: 64, networkId: 3 }
+      bot._bedrockItemToNotch = (it) => ({ network_id: it.networkId, count: it.count, metadata: 0, has_stack_id: true, stack_id: 1, block_runtime_id: -2108756090 })
+      bot.lookAt = async () => {}
+      bot.entity.position = new Vec3(0, 64, 0)
+      bot.entity.eyeHeight = 1.62
+      const ref = { position: new Vec3(0, 63, 0), stateId: -567203660 }
+      await bot.placeBlock(ref, { x: 0, y: 1, z: 0 })
+      const tx = sent.find(p => p.name === 'inventory_transaction')
+      assert.ok(tx, 'inventory_transaction should be sent')
+      assert.strictEqual(tx.params.transaction.transaction_data.action_type, 'click_block')
+      assert.deepStrictEqual(tx.params.transaction.actions, [], 'actions must be empty so the server recomputes the inventory change')
+      check(tx)
     })
 
     it('attack throws on an unknown entity rather than sending', function () {
