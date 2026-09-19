@@ -109,6 +109,41 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(slots[36].count, 3, 'one log consumed from the stack')
     })
 
+    it('craft on a table places a shaped 3x3 recipe into the right grid cells (skipping gaps)', async function () {
+      const { EventEmitter } = require('events')
+      const registryLoader = require('prismarine-registry')
+      const reg = registryLoader('bedrock_' + version)
+      const chestId = reg.itemsByName.chest?.id ?? 54
+      const planksId = reg.itemsByName.oak_planks.id
+      const sent = []
+      const bot = new EventEmitter()
+      bot.registry = reg
+      const slots = new Array(46).fill(null)
+      slots[36] = { name: 'oak_planks', type: planksId, count: 64, stackId: 3 } // hotbar 0, plenty
+      bot.inventory = { slots, items: () => slots.map((it, i) => it && Object.assign({}, it, { slot: i })).filter(Boolean), updateSlot: (i, item) => { slots[i] = item } }
+      bot.currentWindow = null
+      bot.openContainer = () => { bot.currentWindow = { id: 3, type: 'workbench' }; setImmediate(() => bot.emit('windowOpen', bot.currentWindow)) }
+      bot._client = new EventEmitter()
+      bot._client.queue = (name, params) => {
+        sent.push({ name, params })
+        if (name !== 'item_stack_request') return
+        const req = params.requests[0]
+        const isCraft = req.actions.some(a => a.type_id === 'craft_recipe')
+        const placeSlot = (req.actions.find(a => a.type_id === 'place')?.destination?.slot)
+        setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: req.request_id, status: 'ok', containers: isCraft ? [] : [{ slot_type: { container_id: 'crafting_input' }, slots: [{ slot: placeSlot, count: 1, item_stack_id: 900 + placeSlot }] }] }] }))
+      }
+      injectCrafting(bot)
+      const p = { name: 'oak_planks', id: planksId, count: 1 }
+      const recipe = { id: 1054, type: 'shaped', width: 3, height: 3, result: { type: chestId, id: chestId, count: 1, metadata: 0 }, ingredients: new Array(8).fill(p), shape: [p, p, p, p, null, p, p, p, p], requiresTable: true }
+      await bot.craft(recipe, 1, { name: 'crafting_table', position: { x: 0, y: 64, z: 0 } })
+
+      const gridSlots = sent.filter(s => s.name === 'item_stack_request').map(s => s.params.requests[0].actions.find(a => a.type_id === 'place')).filter(Boolean).map(a => a.destination.slot).sort((a, b) => a - b)
+      assert.deepStrictEqual(gridSlots, [32, 33, 34, 35, 37, 38, 39, 40], '3x3 ring maps to crafting_input 32-40 skipping the centre (36)')
+      const craftReq = sent.map(s => s.params?.requests?.[0]).find(r => r && r.actions.some(a => a.type_id === 'craft_recipe'))
+      assert.strictEqual(craftReq.actions.filter(a => a.type_id === 'consume').length, 8, 'consumes all eight grid items')
+      assert.ok(slots.some(it => it && it.type === chestId), 'the crafted chest is stored')
+    })
+
     it('craft throws for a table recipe without a table, and for a missing ingredient', async function () {
       const bot = makeBot()
       bot.inventory = { slots: new Array(46).fill(null), items: () => [], updateSlot: () => {} }
