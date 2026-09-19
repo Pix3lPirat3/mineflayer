@@ -43,6 +43,22 @@ for (const version of bedrockTestedVersions) {
       assert.doesNotThrow(() => { const _ = bot.heldItem }) // eslint-disable-line no-unused-vars
     })
 
+    it('moveInventoryItem emits a serializable item_stack_request and applies an ok response', function () {
+      const { bot, sent } = makeBot(version)
+      const serializer = createSerializer(version)
+      bot.inventory.updateSlot(36, { name: 'dirt', type: 3, count: 64, stackId: 4 }) // bedrock hotbar slot 0
+      const rid = bot.moveInventoryItem(0, 2) // hotbar 0 -> hotbar 2 (empty) => place
+      const req = sent.find(p => p.name === 'item_stack_request')
+      assert.ok(req, 'item_stack_request should be sent')
+      assert.strictEqual(req.params.requests[0].actions[0].type_id, 'place')
+      assert.strictEqual(req.params.requests[0].actions[0].source.slot_type.container_id, 'hotbar')
+      assert.doesNotThrow(() => serializer.createPacketBuffer(req), 'item_stack_request must serialize')
+      // apply an ok response and confirm the item moved locally (slot 36 -> slot 38)
+      bot._client.emit('item_stack_response', { responses: [{ status: 'ok', request_id: rid, containers: [{ slot_type: { container_id: 'hotbar' }, slots: [{ slot: 0, count: 0 }, { slot: 2, count: 64, item_stack_id: 20 }] }] }] })
+      assert.ok(!bot.inventory.slots[36], 'source slot cleared')
+      assert.ok(bot.inventory.slots[38] && bot.inventory.slots[38].name === 'dirt', 'item moved to hotbar slot 2')
+    })
+
     it('rejects an out-of-range hotbar slot', function () {
       const { bot } = makeBot(version)
       assert.throws(() => bot.setQuickBarSlot(9))
