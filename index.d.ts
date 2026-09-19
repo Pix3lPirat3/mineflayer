@@ -16,6 +16,7 @@ export function createBot (options: { client: Client } & Partial<BotOptions>): B
 export function createBot (options: BotOptions): Bot
 
 export interface BotOptions extends ClientOptions {
+  edition?: 'java' | 'bedrock'
   logErrors?: boolean
   hideErrors?: boolean
   loadInternalPlugins?: boolean
@@ -177,6 +178,7 @@ export interface CommandBlockOptions {
 }
 
 export interface Bot extends TypedEmitter<BotEvents> {
+  edition: 'java' | 'bedrock'
   username: string
   protocolVersion: string
   majorVersion: string
@@ -906,6 +908,7 @@ export class Particle {
 }
 
 export let testedVersions: string[]
+export let bedrockTestedVersions: string[]
 export let latestSupportedVersion: string
 export let oldestSupportedVersion: string
 

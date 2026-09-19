@@ -805,7 +805,7 @@ Particle speed in a random direction
 Create and return an instance of the class bot.
 `options` is an object containing the optional properties :
  * username : default to 'Player'
- * port : default to 25565
+ * port : default to 25565 for Java and 19132 for Bedrock
  * password : can be omitted (if the tokens are also omitted then it tries to connect in offline mode)
  * host : default to localhost
  * version : default to automatically guessing the version of the server. Example of value : "1.12.2"
@@ -818,7 +818,8 @@ Create and return an instance of the class bot.
  * checkTimeoutInterval : default to `30*1000` (30s), check if keepalive received at that period, disconnect otherwise.
  * loadInternalPlugins : defaults to true
  * storageBuilder : an optional function, takes as argument version and worldName and return an instance of something with the same API as prismarine-provider-anvil. Will be used to save the world.
- * client : an instance of node-minecraft-protocol, if not specified, mineflayer makes its own client. This can be used to enable using mineflayer through a proxy of many clients or a vanilla client and a mineflayer client.
+ * edition : `java` by default, or `bedrock` to connect to a Bedrock Edition server with bedrock-protocol. A version prefixed with `bedrock_` (for example `bedrock_1.26.45`) selects Bedrock as well.
+ * client : an instance of node-minecraft-protocol (Java) or bedrock-protocol (Bedrock), if not specified, mineflayer makes its own client. This can be used to enable using mineflayer through a proxy of many clients or a vanilla client and a mineflayer client.
  * brand : the brand name for the client to use. Defaults to vanilla. Can be used to simulate custom clients for servers that require it.
  * respawn : when set to false disables bot from automatically respawning, defaults to true.
  * plugins : object : defaults to {}
@@ -836,6 +837,21 @@ Create and return an instance of the class bot.
  * [particleStatus](#bot.settings.particleStatus)
  * chatLengthLimit : the maximum amount of characters that can be sent in a single message. If this is not set, it will be 100 in < 1.11 and 256 in >= 1.11.
  * defaultChatPatterns: defaults to true, set to false to not add the patterns such as chat and whisper
+
+#### Bedrock Edition
+
+Bedrock support is experimental and covers the connection lifecycle, the local player, game state (`bot.game`),
+health and food, time, spawn point, settings and chat. Entities, the world, inventory and physics are not implemented
+for Bedrock yet; the corresponding properties and methods are absent on a Bedrock bot.
+
+The join sequence mirrors the official client: after the resource pack phase the bot ends its loading screen, clears
+the aim-assist preset, announces `set_local_player_as_initialized` and then sends `player_auth_input` every tick, which
+Bedrock servers require to keep the session alive. Versions are given with the `bedrock_` prefix, as in minecraft-data;
+`mineflayer.bedrockTestedVersions` lists the versions the test suite runs against.
+
+```js
+const bot = mineflayer.createBot({ edition: 'bedrock', host: 'localhost', port: 19132, version: 'bedrock_1.26.45', username: 'bot', offline: true })
+```
 
 ### Properties
 
