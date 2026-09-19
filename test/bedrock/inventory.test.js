@@ -64,5 +64,39 @@ for (const version of bedrockTestedVersions) {
       assert.throws(() => bot.setQuickBarSlot(9))
       assert.throws(() => bot.setQuickBarSlot(-1))
     })
+
+    it('depositItem emits a serializable place into the container container_id', function () {
+      const { bot, sent } = makeBot(version)
+      bot.currentWindow = { id: 5, type: 'container', slots: [] }
+      bot.inventory.updateSlot(36, { name: 'dirt', type: 3, count: 10, stackId: 7 })
+      bot.depositItem(0, 0, 10) // hotbar slot 0 -> container slot 0
+      const req = sent.find(p => p.name === 'item_stack_request')
+      assert.ok(req, 'item_stack_request should be sent')
+      const action = req.params.requests[0].actions[0]
+      assert.strictEqual(action.type_id, 'place')
+      assert.strictEqual(action.source.slot_type.container_id, 'hotbar')
+      assert.strictEqual(action.destination.slot_type.container_id, 'container')
+      assert.strictEqual(action.source.stack_id, 7)
+      assert.doesNotThrow(() => serializer.createPacketBuffer(req), 'item_stack_request must serialize')
+    })
+
+    it('withdrawItem takes from the container into a player slot and serializes', function () {
+      const { bot, sent } = makeBot(version)
+      bot.currentWindow = { id: 5, type: 'container', slots: [{ name: 'dirt', type: 3, count: 4, stackId: 27 }] }
+      bot.withdrawItem(0, 9, 4) // container slot 0 -> inventory slot 9 (main slot 0)
+      const req = sent.find(p => p.name === 'item_stack_request')
+      const action = req.params.requests[0].actions[0]
+      assert.strictEqual(action.source.slot_type.container_id, 'container')
+      assert.strictEqual(action.source.stack_id, 27)
+      assert.strictEqual(action.destination.slot_type.container_id, 'inventory')
+      assert.doesNotThrow(() => serializer.createPacketBuffer(req), 'item_stack_request must serialize')
+    })
+
+    it('depositItem/withdrawItem throw when no container is open', function () {
+      const { bot } = makeBot(version)
+      bot.currentWindow = null
+      assert.throws(() => bot.depositItem(0, 0))
+      assert.throws(() => bot.withdrawItem(0, 9))
+    })
   })
 }
