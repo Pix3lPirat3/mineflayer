@@ -65,11 +65,38 @@ for (const version of bedrockTestedVersions) {
       sent.forEach(check)
     })
 
-    it('useOn sends an interact transaction and serializes', function () {
+    it('useOn reports mouse-over then sends an interact transaction, all serializable', function () {
       const { bot, sent } = makeBot()
       bot.useOn(bot.entities[5])
-      assert.strictEqual(sent[0].params.transaction.transaction_data.action_type, 'interact')
+      assert.strictEqual(sent[0].name, 'interact')
+      assert.strictEqual(sent[0].params.action_id, 'mouse_over_entity')
+      assert.strictEqual(sent[0].params.target_entity_id, 5n, 'mouse-over must use the entity runtime id')
+      assert.strictEqual(sent[1].name, 'inventory_transaction')
+      assert.strictEqual(sent[1].params.transaction.transaction_data.action_type, 'interact')
       sent.forEach(check)
+    })
+
+    it('useOn throws on an unknown entity rather than sending', function () {
+      const { bot, sent } = makeBot()
+      assert.throws(() => bot.useOn(999))
+      assert.strictEqual(sent.length, 0)
+    })
+
+    it('openInventory sends a serializable interact open_inventory targeting the player', function () {
+      const { bot, sent } = makeBot()
+      bot.openInventory()
+      assert.strictEqual(sent[0].name, 'interact')
+      assert.strictEqual(sent[0].params.action_id, 'open_inventory')
+      assert.strictEqual(sent[0].params.target_entity_id, 321n, 'must target the player runtime id')
+      check(sent[0])
+    })
+
+    it('setMouseOverEntity(null) clears the hover with target 0', function () {
+      const { bot, sent } = makeBot()
+      bot.setMouseOverEntity(null)
+      assert.strictEqual(sent[0].params.action_id, 'mouse_over_entity')
+      assert.strictEqual(sent[0].params.target_entity_id, 0n)
+      check(sent[0])
     })
 
     it('placeBlock emits a serializable click_block with empty actions', async function () {
