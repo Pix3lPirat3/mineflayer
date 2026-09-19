@@ -66,5 +66,56 @@ for (const version of bedrockTestedVersions) {
       const withTable = bot.recipesFor('oak_planks', null, 1, true).map(r => r.id)
       assert.ok(withTable.includes(99), '3x3 recipe included with a table')
     })
+
+    it('craft places the ingredient, sends the verified craft actions, and stores the result', async function () {
+      const registryLoader = require('prismarine-registry')
+      const reg = registryLoader('bedrock_' + version)
+      const planksId = reg.itemsByName.oak_planks.id
+      const logId = reg.itemsByName.oak_log?.id ?? 17
+      const sent = []
+      const bot = new (require('events').EventEmitter)()
+      bot.registry = reg
+      const slots = new Array(46).fill(null)
+      slots[36] = { name: 'oak_log', type: logId, count: 4, stackId: 5 } // hotbar slot 0
+      bot.inventory = { slots, items: () => slots.map((it, i) => it && Object.assign({}, it, { slot: i })).filter(Boolean), updateSlot: (i, item) => { slots[i] = item } }
+      bot.currentWindow = { id: 0 } // pretend the inventory screen is open so craft does not try to open it
+      bot._client = new (require('events').EventEmitter)()
+      bot._client.queue = (name, params) => {
+        sent.push({ name, params })
+        if (name !== 'item_stack_request') return
+        const req = params.requests[0]
+        const isCraft = req.actions.some(a => a.type_id === 'craft_recipe')
+        setImmediate(() => bot._client.emit('item_stack_response', {
+          responses: [{ request_id: req.request_id, status: 'ok', containers: isCraft ? [] : [{ slot_type: { container_id: 'crafting_input' }, slots: [{ slot: 28, count: 1, item_stack_id: 99 }] }] }]
+        }))
+      }
+      injectCrafting(bot)
+      const recipe = { id: 564, type: 'shaped', width: 1, height: 1, result: { type: planksId, id: planksId, count: 4, metadata: 0 }, ingredients: [{ name: 'oak_log', id: logId, count: 1 }], requiresTable: false }
+      await bot.craft(recipe, 1)
+
+      const craftReq = sent.map(s => s.params?.requests?.[0]).find(r => r && r.actions.some(a => a.type_id === 'craft_recipe'))
+      assert.ok(craftReq, 'a craft_recipe request is sent')
+      const cr = craftReq.actions.find(a => a.type_id === 'craft_recipe')
+      assert.strictEqual(cr.recipe_network_id, 564)
+      const consume = craftReq.actions.find(a => a.type_id === 'consume')
+      assert.strictEqual(consume.source.slot_type.container_id, 'crafting_input')
+      assert.strictEqual(consume.source.stack_id, 99, 'consume uses the grid stack id from the place response')
+      const take = craftReq.actions.find(a => a.type_id === 'take')
+      assert.strictEqual(take.source.slot_type.container_id, 'creative_output')
+      assert.strictEqual(take.source.slot, 50)
+      assert.strictEqual(take.source.stack_id, craftReq.request_id, 'the output stack id is the request id')
+      // result stored in the first free slot (hotbar 1 -> player slot 37), log consumed
+      assert.ok(slots[37] && slots[37].type === planksId && slots[37].count === 4, 'crafted planks stored')
+      assert.strictEqual(slots[36].count, 3, 'one log consumed from the stack')
+    })
+
+    it('craft throws for a table recipe without a table, and for a missing ingredient', async function () {
+      const bot = makeBot()
+      bot.inventory = { slots: new Array(46).fill(null), items: () => [], updateSlot: () => {} }
+      bot.currentWindow = { id: 0 }
+      bot._client.emit('crafting_data', craftingData)
+      await assert.rejects(() => bot.craft({ id: 99, requiresTable: true, result: { type: 5, count: 1 }, ingredients: [] }), /crafting table/)
+      await assert.rejects(() => bot.craft({ id: 1, requiresTable: false, result: { type: 5, count: 1 }, ingredients: [{ name: 'diamond' }] }), /missing ingredient/)
+    })
   })
 }
