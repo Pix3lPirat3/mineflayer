@@ -96,5 +96,44 @@ for (const version of bedrockTestedVersions) {
       assert.throws(() => bot.attack(999))
       assert.strictEqual(sent.length, 0)
     })
+
+    it('consume sends a serializable item_use click_air and resolves on completed_using_item', async function () {
+      const { EventEmitter } = require('events')
+      const sent = []
+      const bot = new EventEmitter()
+      bot.quickBarSlot = 0
+      bot.heldItem = { name: 'apple', type: 260, count: 3, networkId: 288 }
+      bot.entity = { id: 321, position: { x: 0, y: 64, z: 0 }, eyeHeight: 1.62 }
+      bot._bedrockItemToNotch = (it) => ({ network_id: it.networkId, count: it.count, metadata: 0, has_stack_id: false, block_runtime_id: 0 })
+      bot._client = new EventEmitter()
+      bot._client.entityId = 321n
+      bot._client.queue = (name, params) => sent.push({ name, params })
+      injectInteract(bot)
+
+      const promise = bot.consume()
+      const tx = sent.find(p => p.name === 'inventory_transaction')
+      assert.ok(tx, 'consume should send an item_use transaction')
+      assert.strictEqual(tx.params.transaction.transaction_data.action_type, 'click_air')
+      assert.deepStrictEqual(tx.params.transaction.actions, [])
+      assert.strictEqual(tx.params.transaction.transaction_data.held_item.network_id, 288)
+      check(tx)
+
+      bot._client.emit('completed_using_item', { used_item_id: 288, use_method: 'eat' })
+      const info = await promise
+      assert.strictEqual(info.useMethod, 'eat')
+      assert.strictEqual(info.itemId, 288)
+    })
+
+    it('consume rejects when nothing is held', async function () {
+      const { EventEmitter } = require('events')
+      const bot = new EventEmitter()
+      bot.heldItem = null
+      bot.entity = { id: 1, position: { x: 0, y: 64, z: 0 }, eyeHeight: 1.62 }
+      bot._client = new EventEmitter()
+      bot._client.entityId = 1n
+      bot._client.queue = () => {}
+      injectInteract(bot)
+      await assert.rejects(() => bot.consume(), /no item is held/)
+    })
   })
 }
