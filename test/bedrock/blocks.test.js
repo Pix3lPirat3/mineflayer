@@ -52,4 +52,19 @@ describe('bedrock ' + version + ' blocks world-support guard', function () {
     assert.strictEqual(bot._bedrockWorldSupport.supported, false)
     assert.ok(bot._bedrockWorldSupport.reason, 'a reason should be given')
   })
+
+  // findBlock/findBlocks correctness is verified live against BDS (string, array and predicate matchers all locate
+  // real blocks); here we only guard that inject wires them and that they are safe on an empty (unloaded) world.
+  it('wires findBlock/findBlocks and returns nothing safely on an empty world', function () {
+    const registry = registryLoader('bedrock_' + version)
+    registry.handleStartGame(startGame)
+    const bot = makeBot(registry)
+    const { Vec3 } = require('vec3')
+    bot.entity = { position: new Vec3(0, 64, 0) }
+    assert.strictEqual(typeof bot.findBlock, 'function')
+    assert.strictEqual(typeof bot.findBlocks, 'function')
+    assert.deepStrictEqual(bot.findBlocks({ matching: 'stone', maxDistance: 4 }), [])
+    assert.strictEqual(bot.findBlock({ matching: 'stone', maxDistance: 4 }), null)
+    assert.doesNotThrow(() => bot.findBlocks({ matching: (b) => b && b.name === 'stone', maxDistance: 4 }))
+  })
 })
