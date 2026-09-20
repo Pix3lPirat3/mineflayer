@@ -59,6 +59,34 @@ for (const version of bedrockTestedVersions) {
       assert.ok(bot.inventory.slots[38] && bot.inventory.slots[38].name === 'dirt', 'item moved to hotbar slot 2')
     })
 
+    it('applies a normal inventory_transaction (ground pickup) with its server stack id', function () {
+      const { bot } = makeBot(version)
+      // BDS reports a ground pickup as a normal inventory_transaction whose container action carries the new item with
+      // its authoritative stack id, rather than an inventory_slot/content update. The item must land in the player
+      // inventory with that stack id so it can be used in a later item_stack_request (craft/move) without a resync.
+      bot._client.emit('inventory_transaction', {
+        transaction: {
+          transaction_type: 'normal',
+          actions: [
+            { source_type: 'container', window_id: 0, slot: 0, old_item: { network_id: 0, count: 0 }, new_item: { network_id: 3, count: 2, metadata: 0, has_stack_id: true, stack_id: 5, block_runtime_id: 0, extra: { has_nbt: 0, can_place_on: [], can_destroy: [] } } },
+            { source_type: 'world_interaction', slot: 1, old_item: { network_id: 3, count: 2 }, new_item: { network_id: 0, count: 0 } }
+          ]
+        }
+      })
+      const picked = bot.inventory.slots[36] // bedrock inventory slot 0 -> mineflayer hotbar slot 0
+      assert.ok(picked && picked.name === 'dirt', 'picked-up item lands in the inventory')
+      assert.strictEqual(picked.count, 2, 'count preserved')
+      assert.strictEqual(picked.stackId, 5, 'carries the server stack id')
+    })
+
+    it('ignores a non-normal inventory_transaction', function () {
+      const { bot } = makeBot(version)
+      bot._client.emit('inventory_transaction', {
+        transaction: { transaction_type: 'item_use', actions: [{ source_type: 'container', window_id: 0, slot: 0, new_item: { network_id: 3, count: 1, has_stack_id: true, stack_id: 9 } }] }
+      })
+      assert.ok(!bot.inventory.slots[36], 'non-normal transactions do not touch the inventory')
+    })
+
     it('rejects an out-of-range hotbar slot', function () {
       const { bot } = makeBot(version)
       assert.throws(() => bot.setQuickBarSlot(9))
