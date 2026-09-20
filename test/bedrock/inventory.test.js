@@ -89,6 +89,21 @@ for (const version of bedrockTestedVersions) {
       assert.ok(!bot.inventory.slots[36], 'source hotbar slot cleared')
     })
 
+    it('toss drops from the item slot and shrinks the stack on the ok response', async function () {
+      const { bot, sent } = makeBot(version)
+      bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
+      bot.inventory.updateSlot(36, { name: 'dirt', type: 3, count: 20, stackId: 9 }) // hotbar slot 0
+      const serializer = createSerializer(version)
+      bot._client.queue = (name, params) => { sent.push({ name, params }); if (name === 'item_stack_request') { const r = params.requests[0]; setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: r.request_id, status: 'ok', containers: [] }] })) } }
+      await bot.toss('dirt', null, 5)
+      await new Promise(resolve => setTimeout(resolve, 30))
+      const req = sent.find(p => p.name === 'item_stack_request')
+      assert.strictEqual(req.params.requests[0].actions[0].type_id, 'drop')
+      assert.strictEqual(req.params.requests[0].actions[0].count, 5)
+      assert.doesNotThrow(() => serializer.createPacketBuffer(req), 'drop item_stack_request must serialize')
+      assert.strictEqual(bot.inventory.slots[36].count, 15, 'stack shrank by the dropped count')
+    })
+
     it('equip off-hand is reported as not yet supported', async function () {
       const { bot } = makeBot(version)
       bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
