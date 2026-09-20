@@ -132,11 +132,21 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(bot.inventory.slots[36].count, 15, 'stack shrank by the dropped count')
     })
 
-    it('equip off-hand is reported as not yet supported', async function () {
-      const { bot } = makeBot(version)
+    it('equip off-hand sends a normal inventory_transaction into the offhand window (119)', async function () {
+      const { bot, sent } = makeBot(version)
       bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
-      bot.inventory.updateSlot(36, { name: 'shield', type: 355, count: 1, stackId: 1 })
-      await assert.rejects(() => bot.equip('shield', 'off-hand'), /not yet supported/)
+      bot.inventory.updateSlot(36, { name: 'shield', type: 355, count: 1, stackId: 1 }) // hotbar slot 0
+      await bot.equip('shield', 'off-hand')
+      const tx = sent.find(p => p.name === 'inventory_transaction')
+      assert.ok(tx, 'inventory_transaction should be sent')
+      assert.strictEqual(tx.params.transaction.transaction_type, 'normal')
+      const dest = tx.params.transaction.actions.find(a => a.window_id === 119)
+      assert.ok(dest && dest.new_item.network_id, 'moves the item into the offhand window (119)')
+      const from = tx.params.transaction.actions.find(a => a.window_id === 0)
+      assert.ok(from && from.slot === 0, 'takes from the player inventory window (0) at the source slot')
+      assert.ok(bot.inventory.slots[45] && bot.inventory.slots[45].name === 'shield', 'shield worn in the off-hand slot (45)')
+      assert.ok(!bot.inventory.slots[36], 'source hotbar slot cleared')
+      // (wire serialization of the transaction is covered by the live BDS test, which uses real inventory Items)
     })
 
     it('depositItem emits a serializable place into the container container_id', function () {
