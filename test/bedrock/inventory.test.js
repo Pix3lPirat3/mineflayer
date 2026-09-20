@@ -65,6 +65,37 @@ for (const version of bedrockTestedVersions) {
       assert.throws(() => bot.setQuickBarSlot(-1))
     })
 
+    it('equip to hand selects a hotbar item', async function () {
+      const { bot } = makeBot(version)
+      bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
+      bot.inventory.updateSlot(38, { name: 'iron_sword', type: 308, count: 1, stackId: 2 }) // hotbar slot 2
+      await bot.equip('iron_sword', 'hand')
+      assert.strictEqual(bot.quickBarSlot, 2, 'selected the sword hotbar slot')
+    })
+
+    it('equip to armor sends a place into the armor container and wears it on the ok response', async function () {
+      const { bot, sent } = makeBot(version)
+      bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
+      bot.currentWindow = { id: 0 } // pretend the inventory screen is open
+      bot.inventory.updateSlot(36, { name: 'iron_helmet', type: 298, count: 1, stackId: 4 }) // hotbar slot 0
+      // auto-ok the item_stack_request
+      bot._client.queue = (name, params) => { sent.push({ name, params }); if (name === 'item_stack_request') { const r = params.requests[0]; setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: r.request_id, status: 'ok', containers: [{ slot_type: { container_id: 'armor' }, slots: [{ slot: 0, count: 1 }] }] }] })) } }
+      await bot.equip('iron_helmet', 'head')
+      await new Promise(resolve => setTimeout(resolve, 50))
+      const req = sent.find(p => p.name === 'item_stack_request')
+      assert.strictEqual(req.params.requests[0].actions[0].destination.slot_type.container_id, 'armor')
+      assert.strictEqual(req.params.requests[0].actions[0].destination.slot, 0, 'head is armor slot 0')
+      assert.ok(bot.inventory.slots[5] && bot.inventory.slots[5].name === 'iron_helmet', 'helmet worn in the head slot (5)')
+      assert.ok(!bot.inventory.slots[36], 'source hotbar slot cleared')
+    })
+
+    it('equip off-hand is reported as not yet supported', async function () {
+      const { bot } = makeBot(version)
+      bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
+      bot.inventory.updateSlot(36, { name: 'shield', type: 355, count: 1, stackId: 1 })
+      await assert.rejects(() => bot.equip('shield', 'off-hand'), /not yet supported/)
+    })
+
     it('depositItem emits a serializable place into the container container_id', function () {
       const { bot, sent } = makeBot(version)
       bot.currentWindow = { id: 5, type: 'container', slots: [] }
