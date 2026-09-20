@@ -46,11 +46,12 @@ for (const version of bedrockTestedVersions) {
       sent.forEach(check)
     })
 
-    it('deactivateItem emits a serializable player_action', function () {
+    it('deactivateItem emits a serializable item_release transaction (fires a bow)', function () {
       const { bot, sent } = makeBot()
       bot.deactivateItem()
-      assert.strictEqual(sent[0].name, 'player_action')
-      assert.strictEqual(sent[0].params.runtime_entity_id, 321n)
+      assert.strictEqual(sent[0].name, 'inventory_transaction')
+      assert.strictEqual(sent[0].params.transaction.transaction_type, 'item_release')
+      assert.strictEqual(sent[0].params.transaction.transaction_data.action_type, 'release')
       check(sent[0])
     })
 
