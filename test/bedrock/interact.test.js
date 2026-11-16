@@ -119,6 +119,26 @@ for (const version of bedrockTestedVersions) {
       check(tx)
     })
 
+    it('a click names the block the world holds now, not the one the caller read earlier', async function () {
+      // As when soil is tilled and then planted on the block object read before the tilling: the server ignores a click
+      // whose block_runtime_id is the old block's. Seen live on a Bedrock Dedicated Server 1.26.63.
+      const { Vec3 } = require('vec3')
+      const { bot, sent } = makeBot()
+      bot.lookAt = async () => {}
+      bot.entity.position = new Vec3(0, 64, 0)
+      const readEarlier = { position: new Vec3(1, 63, 0), stateId: 111 }
+      bot.blockAt = (position) => ({ position, stateId: 222 })
+      await bot.activateBlock(readEarlier)
+      let tx = sent.find(p => p.name === 'inventory_transaction')
+      assert.strictEqual(tx.params.transaction.transaction_data.block_runtime_id, 222)
+      // Without a world to ask, what the caller handed over is all there is.
+      sent.length = 0
+      delete bot.blockAt
+      await bot.activateBlock(readEarlier)
+      tx = sent.find(p => p.name === 'inventory_transaction')
+      assert.strictEqual(tx.params.transaction.transaction_data.block_runtime_id, 111)
+    })
+
     it('attack throws on an unknown entity rather than sending', function () {
       const { bot, sent } = makeBot()
       assert.throws(() => bot.attack(999))
