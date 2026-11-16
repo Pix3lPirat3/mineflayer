@@ -59,5 +59,28 @@ for (const version of bedrockTestedVersions) {
       assert.ok(Math.abs(bot.entity.position.y - 64) < 1e-6, 'feet = eye - eyeHeight')
       assert.strictEqual(bot.entity.position.z, -4)
     })
+
+    it('a bot that is not steering takes even a small correction in full', function () {
+      // As when the pathfinder's fullStop() moves the position to the middle of a block: the server does not follow,
+      // and says so. Taking only Y left the bot over a hole it was not in, falling and being put back up for good.
+      // Seen live on a Bedrock Dedicated Server 1.26.63.
+      const { bot } = makeBot(version)
+      bot._client.emit('correct_player_move_prediction', { position: { x: 0.4, y: 65.62, z: -0.2 } })
+      assert.strictEqual(bot.entity.position.x, 0.4)
+      assert.strictEqual(bot.entity.position.z, -0.2)
+    })
+
+    it('a bot that is steering keeps its own place against a small correction', function () {
+      // The correction is for a tick in the past and the bot has walked on since; only its height is taken.
+      const { bot } = makeBot(version)
+      bot.setControlState('forward', true)
+      bot._client.emit('correct_player_move_prediction', { position: { x: 0.4, y: 66.62, z: 0 } })
+      assert.strictEqual(bot.entity.position.x, 0)
+      assert.ok(Math.abs(bot.entity.position.y - 65) < 1e-6)
+      // A large one is the server moving the bot, steering or not.
+      bot._client.emit('correct_player_move_prediction', { position: { x: 3, y: 66.62, z: 0 } })
+      assert.strictEqual(bot.entity.position.x, 3)
+      bot._client.emit('close')
+    })
   })
 }
