@@ -119,6 +119,44 @@ for (const version of bedrockTestedVersions) {
       check(tx)
     })
 
+    it('a bucket is used on the block the bot looks at, not in the air', async function () {
+      // On Java "use the held item" fills a bucket from the water in view, and empties one onto the block in view. The
+      // Bedrock server only does either for a click on that block. Seen live on a Bedrock Dedicated Server 1.26.63.
+      const { Vec3 } = require('vec3')
+      const { bot, sent } = makeBot()
+      bot.lookAt = async () => {}
+      bot.entity.position = new Vec3(0.5, 64, 0.5)
+      bot.entity.yaw = 0 // looking along -z
+      bot.entity.pitch = 0
+      const air = { name: 'air', shapes: [] }
+      const blocks = { '0,65,-2': { name: 'water', shapes: [], stateId: 77 }, '0,65,-3': { name: 'stone', shapes: [[0, 0, 0, 1, 1, 1]], stateId: 1 } }
+      bot.blockAt = (p) => ({ ...(blocks[`${p.x},${p.y},${p.z}`] || air), position: new Vec3(p.x, p.y, p.z) })
+      const clicked = () => sent.find(p => p.name === 'inventory_transaction').params.transaction.transaction_data
+
+      bot.heldItem = { name: 'bucket', type: 1, count: 1 }
+      bot.activateItem()
+      await new Promise(resolve => setTimeout(resolve, 200))
+      assert.strictEqual(clicked().action_type, 'click_block', 'the water is clicked')
+      assert.deepStrictEqual(clicked().block_position, { x: 0, y: 65, z: -2 })
+      assert.strictEqual(clicked().block_runtime_id, 77)
+
+      // A full bucket is emptied onto the block in view, on the face in view.
+      sent.length = 0
+      bot.heldItem = { name: 'water_bucket', type: 2, count: 1 }
+      bot.blockAtCursor = () => ({ name: 'stone', stateId: 1, face: 3, position: new Vec3(0, 65, -3) })
+      bot.activateItem()
+      await new Promise(resolve => setTimeout(resolve, 200))
+      assert.deepStrictEqual(clicked().block_position, { x: 0, y: 65, z: -3 })
+      assert.strictEqual(clicked().face, 3)
+
+      // Nothing in view: the bucket is used in the air, as before.
+      sent.length = 0
+      bot.heldItem = { name: 'bucket', type: 1, count: 1 }
+      bot.blockAt = (p) => ({ ...air, position: new Vec3(p.x, p.y, p.z) })
+      bot.activateItem()
+      assert.strictEqual(clicked().action_type, 'click_air')
+    })
+
     it('attack throws on an unknown entity rather than sending', function () {
       const { bot, sent } = makeBot()
       assert.throws(() => bot.attack(999))
