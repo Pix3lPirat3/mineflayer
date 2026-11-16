@@ -86,7 +86,8 @@ for (const version of bedrockTestedVersions) {
         const req = params.requests[0]
         const isCraft = req.actions.some(a => a.type_id === 'craft_recipe')
         setImmediate(() => bot._client.emit('item_stack_response', {
-          responses: [{ request_id: req.request_id, status: 'ok', containers: isCraft ? [] : [{ slot_type: { container_id: 'crafting_input' }, slots: [{ slot: 28, count: 1, item_stack_id: 99 }] }] }]
+          // As a server answers: the place names the grid slot's new stack, the craft names the result's (hotbar slot 1).
+          responses: [{ request_id: req.request_id, status: 'ok', containers: isCraft ? [{ slot_type: { container_id: 'crafting_input' }, slots: [{ slot: 28, count: 0 }] }, { slot_type: { container_id: 'hotbar' }, slots: [{ slot: 1, count: 4, item_stack_id: 34 }] }] : [{ slot_type: { container_id: 'crafting_input' }, slots: [{ slot: 28, count: 1, item_stack_id: 99 }] }] }]
         }))
       }
       injectCrafting(bot)
@@ -106,6 +107,7 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(take.source.stack_id, craftReq.request_id, 'the output stack id is the request id')
       // result stored in the first free slot (hotbar 1 -> player slot 37), log consumed
       assert.ok(slots[37] && slots[37].type === planksId && slots[37].count === 4, 'crafted planks stored')
+      assert.strictEqual(slots[37].stackId, 34, 'the crafted stack keeps the id the server gave it, so it can be moved or crafted with')
       assert.strictEqual(slots[36].count, 3, 'one log consumed from the stack')
     })
 
