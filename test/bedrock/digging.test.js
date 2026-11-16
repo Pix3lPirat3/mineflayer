@@ -56,6 +56,29 @@ for (const version of bedrockTestedVersions) {
       assert.deepStrictEqual(startEntry.position, { x: 5, y: 64, z: 7 })
     })
 
+    it('bot.dig lets go of the block once the server has broken it', async function () {
+      // Without the closing abort_break the server keeps the bot down as breaking that position, and breaks whatever
+      // block is put there next. Seen live on a Bedrock Dedicated Server 1.26.63: a hole filled back in was empty
+      // again, with the block's item lying in it.
+      const bot = new EventEmitter()
+      bot.registry = registryLoader('bedrock_' + version)
+      bot.game = { gameMode: 'creative' }
+      bot.entity = { position: new Vec3(0, 64, 0), pitch: 0, yaw: 0, eyeHeight: 1.62 }
+      bot.lookAt = async () => {}
+      bot.blockAt = () => ({ name: 'air' })
+      bot._bedrockWorldSupport = { supported: true }
+      const queued = []
+      bot._queueBlockAction = (...entries) => { for (const e of entries) queued.push(e) }
+      injectDigging(bot)
+
+      await bot.dig({ position: new Vec3(5, 64, 7) })
+      const actions = queued.map(q => q.action)
+      assert.strictEqual(actions[actions.length - 1], 'abort_break', 'the last thing sent lets go of the block')
+      assert.ok(actions.indexOf('predict_break') < actions.length - 1, 'after the break was predicted')
+      assert.deepStrictEqual(queued[queued.length - 1].position, { x: 5, y: 64, z: 7 })
+      assert.strictEqual(actions.filter(a => a === 'abort_break').length, 1)
+    })
+
     it('stopDigging aborts the break', function () {
       const bot = new EventEmitter()
       bot.registry = registryLoader('bedrock_' + version)
