@@ -112,6 +112,76 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(slots[9].stackId, 36, 'without the id the server refuses the next request that moves this stack')
     })
 
+    // A chest open next to the player's inventory, with the given stacks of cobblestone on each side. The server
+    // answers every move 'ok' and hands out new stack ids from 100 up for slots a move fills.
+    function chestWithCobblestone ({ chest = {}, inventory = {} }) {
+      const registry = require('prismarine-registry')('bedrock_' + version)
+      const type = registry.itemsByName.cobblestone.id
+      const stack = (slot, count, stackId) => ({ name: 'cobblestone', type, count, slot, stackId })
+      const bot = new EventEmitter()
+      bot.registry = registry
+      bot.blockAt = () => ({ name: 'chest' })
+      const slots = new Array(46).fill(null)
+      for (const [slot, [count, stackId]] of Object.entries(inventory)) slots[slot] = stack(Number(slot), count, stackId)
+      bot.inventory = { slots, items: () => slots.filter(Boolean), updateSlot: (i, item) => { slots[i] = item } }
+      const window = { id: 2, inventoryStart: 27, position: { x: 4, y: 5, z: 6 }, slots: new Array(27).fill(null) }
+      for (const [slot, [count, stackId]] of Object.entries(chest)) window.slots[slot] = stack(Number(slot), count, stackId)
+      const moves = []
+      let nextId = 100
+      bot._client = new EventEmitter()
+      bot._client.queue = (name, params) => {
+        if (name !== 'item_stack_request') return
+        const request = params.requests[0]
+        for (const action of request.actions) moves.push(action)
+        const to = request.actions[0].destination
+        const containers = [{ slot_type: to.slot_type, slots: [{ slot: to.slot, item_stack_id: to.stack_id || nextId++ }] }]
+        setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: request.request_id, status: 'ok', containers }] }))
+      }
+      injectContainers(bot)
+      bot.currentWindow = window
+      return { bot, window, slots, moves }
+    }
+    const brief = (move) => `${move.count} ${move.source.slot_type.container_id}[${move.source.slot}]#${move.source.stack_id} -> ${move.destination.slot_type.container_id}[${move.destination.slot}]#${move.destination.stack_id}`
+
+    it('withdraw gathers the amount across stacks, topping up a stack in the inventory first', async function () {
+      // Java's withdraw moves the amount asked for from as many stacks as it takes, onto stacks of the same item that
+      // have room before empty slots. Here one move of 50 from a stack of 40 was refused by the server.
+      const { bot, window, slots, moves } = chestWithCobblestone({ chest: { 0: [40, 36], 1: [20, 37] }, inventory: { 9: [60, 40] } })
+      await bot.withdraw('cobblestone', null, 50)
+      assert.deepStrictEqual(moves.map(brief), [
+        '4 container[0]#36 -> inventory[9]#40',
+        '36 container[0]#36 -> inventory[10]#0',
+        '10 container[1]#37 -> inventory[10]#100'
+      ])
+      assert.strictEqual(slots[9].count, 64)
+      assert.strictEqual(slots[10].count, 46)
+      assert.strictEqual(window.slots[0], null)
+      assert.strictEqual(window.slots[1].count, 10)
+    })
+
+    it('deposit gathers the amount across stacks, topping up a stack in the container first', async function () {
+      const { bot, window, slots, moves } = chestWithCobblestone({ chest: { 0: [60, 36] }, inventory: { 9: [10, 40], 10: [10, 41] } })
+      await bot.deposit('cobblestone', null, 15)
+      assert.deepStrictEqual(moves.map(brief), [
+        '4 inventory[9]#40 -> container[0]#36',
+        '6 inventory[9]#40 -> container[1]#0',
+        '5 inventory[10]#41 -> container[1]#100'
+      ])
+      assert.strictEqual(slots[9], null)
+      assert.strictEqual(slots[10].count, 5)
+      assert.strictEqual(window.slots[0].count, 64)
+      assert.strictEqual(window.slots[1].count, 11)
+    })
+
+    it('asking for more than there is moves nothing and says how many there are', async function () {
+      const taking = chestWithCobblestone({ chest: { 0: [40, 36] } })
+      await assert.rejects(taking.bot.withdraw('cobblestone', null, 50), /40/)
+      assert.deepStrictEqual(taking.moves, [])
+      const putting = chestWithCobblestone({ inventory: { 9: [10, 40] } })
+      await assert.rejects(putting.bot.deposit('cobblestone', null, 11), /10/)
+      assert.deepStrictEqual(putting.moves, [])
+    })
+
     it('bot.closeWindow sends container_close and clears the window', function () {
       const { bot, sent } = makeBot()
       bot._client.emit('container_open', { window_id: 3, window_type: 'container', coordinates: { x: 0, y: 0, z: 0 }, runtime_entity_id: -1n })
