@@ -52,6 +52,24 @@ for (const version of bedrockTestedVersions) {
       bot._client.emit('close')
     })
 
+    it('a flag queued for the next tick goes out with it once, and serializes', function () {
+      // start_using_item marks the tick a player starts eating or drinking; it is a press, not a held state.
+      const { bot, sent } = makeBot(version)
+      bot._queueInputFlag('start_using_item')
+      bot.emit('spawn') // starts the input loop; send() runs once synchronously
+      const flagsOf = (pkt) => Array.isArray(pkt.params.input_data) ? pkt.params.input_data : Object.keys(pkt.params.input_data).filter(k => pkt.params.input_data[k])
+      const first = sent.filter(p => p.name === 'player_auth_input')
+      assert.ok(first.length >= 1)
+      assert.ok(flagsOf(first[0]).includes('start_using_item'), 'the first tick carries the flag')
+      assert.doesNotThrow(() => serializer.createPacketBuffer(first[0]), 'player_auth_input must serialize')
+      return new Promise(resolve => setTimeout(resolve, 150)).then(() => {
+        const later = sent.filter(p => p.name === 'player_auth_input').slice(1)
+        assert.ok(later.length >= 1, 'later ticks were sent')
+        for (const pkt of later) assert.ok(!flagsOf(pkt).includes('start_using_item'), 'only once')
+        bot._client.emit('close')
+      })
+    })
+
     it('applies correct_player_move_prediction to bot.entity.position (feet from eye level)', function () {
       const { bot } = makeBot(version)
       bot._client.emit('correct_player_move_prediction', { position: { x: 10, y: 65.62, z: -4 } })
