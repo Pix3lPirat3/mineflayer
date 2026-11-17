@@ -45,6 +45,37 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(closed, true)
     })
 
+    it('a barrel\'s and a shulker box\'s slots go by their own name in a deposit and a withdraw', async function () {
+      // A real server refuses (status 49 or 50) a move that calls a barrel's slots 'container'. Seen on a Bedrock Dedicated
+      // Server 1.26.63.
+      const registry = require('prismarine-registry')('bedrock_' + version)
+      const cobblestone = registry.itemsByName.cobblestone.id
+      for (const [block, expected] of [['chest', 'container'], ['barrel', 'barrel'], ['red_shulker_box', 'shulker'], ['undyed_shulker_box', 'shulker']]) {
+        const bot = new EventEmitter()
+        bot.registry = registry
+        bot.blockAt = (pos) => (pos.x === 4 && pos.y === 5 && pos.z === 6 ? { name: block } : { name: 'air' })
+        const slots = new Array(46).fill(null)
+        slots[9] = { name: 'cobblestone', type: cobblestone, count: 3, slot: 9, stackId: 40 }
+        bot.inventory = { slots, items: () => slots.filter(Boolean), updateSlot: (i, item) => { slots[i] = item } }
+        const requests = []
+        bot._client = new EventEmitter()
+        bot._client.queue = (name, params) => {
+          if (name !== 'item_stack_request') return
+          const request = params.requests[0]
+          requests.push(request)
+          setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: request.request_id, status: 'ok', containers: [] }] }))
+        }
+        injectContainers(bot)
+        bot.currentWindow = { id: 2, inventoryStart: 27, position: { x: 4, y: 5, z: 6 }, slots: [{ name: 'cobblestone', type: cobblestone, count: 5, stackId: 36 }] }
+
+        await bot.deposit('cobblestone', null, 3)
+        await bot.withdraw('cobblestone', null, 5)
+
+        assert.strictEqual(requests[0].actions[0].destination.slot_type.container_id, expected, `deposit into a ${block}`)
+        assert.strictEqual(requests[1].actions[0].source.slot_type.container_id, expected, `withdraw from a ${block}`)
+      }
+    })
+
     it('bot.closeWindow sends container_close and clears the window', function () {
       const { bot, sent } = makeBot()
       bot._client.emit('container_open', { window_id: 3, window_type: 'container', coordinates: { x: 0, y: 0, z: 0 }, runtime_entity_id: -1n })
