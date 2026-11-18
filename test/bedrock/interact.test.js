@@ -152,6 +152,53 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(info.itemId, 288)
     })
 
+    it('consume marks the start of the meal on the next input tick, as a real client does', async function () {
+      const { EventEmitter } = require('events')
+      const bot = new EventEmitter()
+      const queued = []
+      bot.quickBarSlot = 0
+      bot.heldItem = { name: 'bread', type: 1, count: 1, networkId: 288 }
+      bot.entity = { id: 321, position: { x: 0, y: 64, z: 0 }, eyeHeight: 1.62 }
+      bot._client = new EventEmitter()
+      bot._client.entityId = 321n
+      bot._client.queue = () => {}
+      bot._queueInputFlag = (flag) => queued.push(flag)
+      injectInteract(bot)
+      const promise = bot.consume()
+      assert.deepStrictEqual(queued, ['start_using_item'])
+      bot._client.emit('completed_using_item', { used_item_id: 288, use_method: 'eat' })
+      await promise
+    })
+
+    it('a meal that times out lets go of the food, as a real client does when the button is released', async function () {
+      // Left alone, the server still has the bot eating: the next meal starts while the last one is still under way.
+      const { EventEmitter } = require('events')
+      const sent = []
+      const bot = new EventEmitter()
+      bot.quickBarSlot = 0
+      bot.heldItem = { name: 'apple', type: 260, count: 3, networkId: 288 }
+      bot.entity = { id: 321, position: { x: 0, y: 64, z: 0 }, eyeHeight: 1.62 }
+      bot._bedrockItemToNotch = (it) => ({ network_id: it.networkId, count: it.count, metadata: 0, has_stack_id: false, block_runtime_id: 0 })
+      bot._client = new EventEmitter()
+      bot._client.entityId = 321n
+      bot._client.queue = (name, params) => sent.push({ name, params })
+      injectInteract(bot)
+      // The meal's own time limit is caught and run at once, instead of waiting it out.
+      const realSetTimeout = global.setTimeout
+      let giveUp = null
+      global.setTimeout = (fn, ms, ...rest) => { if (ms === 4000) { giveUp = fn; return 0 } return realSetTimeout(fn, ms, ...rest) }
+      let promise
+      try { promise = bot.consume() } finally { global.setTimeout = realSetTimeout }
+      assert.ok(giveUp, 'consume has a time limit')
+      giveUp()
+      await assert.rejects(promise, /timed out/)
+      const release = sent.find(p => p.name === 'inventory_transaction' && p.params.transaction.transaction_type === 'item_release')
+      assert.ok(release, 'an item_release is sent when the meal times out')
+      assert.strictEqual(release.params.transaction.transaction_data.action_type, 'release')
+      check(release)
+      assert.strictEqual(bot.usingHeldItem ?? bot._usingItem, false)
+    })
+
     it('consume rejects when nothing is held', async function () {
       const { EventEmitter } = require('events')
       const bot = new EventEmitter()
