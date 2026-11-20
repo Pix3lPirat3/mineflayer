@@ -730,6 +730,49 @@ for (const supportedVersion of mineflayer.testedVersions) {
       })
     })
 
+    describe('sprint state', () => {
+      // A physics that keeps the sprint itself (bot.entity.isSprinting, as prismarine-physics does once it ends a sprint on a
+      // horizontal collision) decides the start and stop sprinting packets; the key no longer does. Here the physics is
+      // wrapped to give a known sprint state and collision each tick.
+      it('sends start and stop sprinting when the sprint state changes, before the move, and the collision in the move', function (done) {
+        const states = [true, true, false, false, true]
+        const sent = []
+        server.on('playerJoin', (client) => run(client).then(() => done(), done))
+        async function run (client) {
+          await client.write('login', bot.test.generateLoginPacket())
+          const chunk = bot.test.buildChunk()
+          // A chunk with nothing in it is not loaded on older versions
+          chunk.setBlockType(vec3(1, 65, 1), 41)
+          const loaded = once(bot, 'chunkColumnLoad')
+          await client.write('map_chunk', generateChunkPacket(chunk))
+          await loaded
+          const simulate = bot.physics.simulatePlayer
+          let tick = 0
+          bot.physics.simulatePlayer = (state, world) => {
+            const out = simulate(state, world)
+            const i = Math.min(tick++, states.length - 1)
+            bot.entity.isSprinting = states[i]
+            out.isCollidedHorizontally = !states[i]
+            return out
+          }
+          client.on('packet', (data, meta) => {
+            if (meta.name === 'entity_action') sent.push(String(data.actionId))
+            if (['position', 'position_look'].includes(meta.name) && sent.length < 12) sent.push(`move${data.flags && data.flags.hasHorizontalCollision ? ' collided' : ''}`)
+          })
+          bot.setControlState('sprint', true)
+          client.write('position', { x: 1.5, y: 80, z: 1.5, dx: 0, dy: 0, dz: 0, pitch: 0, yaw: 0, teleportId: 1, flags: bot.supportFeature('positionPacketHasBitflags') ? { x: false, y: false, z: false, yaw: false, pitch: false } : 0 })
+          await sleep(700)
+          const actions = sent.filter(s => !s.startsWith('move'))
+          // The key's own packet is not sent once the physics keeps the state; one per change of the state
+          assert.deepStrictEqual(actions.map(a => a.replace(/^3$/, 'start_sprinting').replace(/^4$/, 'stop_sprinting')), ['start_sprinting', 'stop_sprinting', 'start_sprinting'])
+          // Each action goes before the move of its tick
+          const firstStop = sent.findIndex(s => s === 'stop_sprinting' || s === '4')
+          assert.ok(sent[firstStop + 1].startsWith('move'))
+          if (bot.registry.version['>=']('1.21.3')) assert.ok(sent.includes('move collided'), sent.join(', '))
+        }
+      })
+    })
+
     describe('tick_end', () => {
       const basePosition = () => ({
         x: 1.5,
