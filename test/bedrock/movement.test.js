@@ -37,6 +37,24 @@ for (const version of bedrockTestedVersions) {
       assert.throws(() => bot.setControlState('teleport', true))
     })
 
+    it('clearControlStates lets go of each key through bot.setControlState, as on Java', function () {
+      const { bot } = makeBot(version)
+      bot.setControlState('forward', true)
+      bot.setControlState('sprint', true)
+      const original = bot.setControlState
+      const calls = []
+      // A wrapper that ignores every call, as a plugin does for a task it has stopped: nothing is let go.
+      bot.setControlState = (control, state) => { calls.push([control, state]) }
+      bot.clearControlStates()
+      assert.deepStrictEqual(calls.map(([control]) => control).sort(), ['back', 'forward', 'jump', 'left', 'right', 'sneak', 'sprint'])
+      assert.ok(calls.every(([, state]) => state === false))
+      assert.strictEqual(bot.getControlState('forward'), true, 'the wrapper decides, not a direct write')
+      bot.setControlState = original
+      bot.clearControlStates()
+      assert.strictEqual(bot.getControlState('forward'), false)
+      assert.strictEqual(bot.getControlState('sprint'), false)
+    })
+
     it('the auth-input tick carries the move_vector and input flags for the active controls, and serializes', function () {
       const { bot, sent } = makeBot(version)
       bot.setControlState('forward', true)
