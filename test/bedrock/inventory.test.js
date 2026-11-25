@@ -176,6 +176,21 @@ for (const version of bedrockTestedVersions) {
       assert.doesNotThrow(() => serializer.createPacketBuffer(req), 'item_stack_request must serialize')
     })
 
+    it('depositItem/withdrawItem name a barrel\'s and a shulker box\'s slots by their own container id', function () {
+      for (const [block, id] of [['barrel', 'barrel'], ['red_shulker_box', 'shulker'], ['chest', 'container']]) {
+        const { bot, sent } = makeBot(version)
+        bot.blockAt = pos => (pos.x === 4 && pos.y === 64 && pos.z === -2 ? { name: block } : null)
+        bot.currentWindow = { id: 5, type: 'container', position: { x: 4, y: 64, z: -2 }, slots: [{ name: 'dirt', type: 3, count: 4, stackId: 27 }] }
+        bot.inventory.updateSlot(36, { name: 'dirt', type: 3, count: 10, stackId: 7 })
+        bot.depositItem(0, 1, 10)
+        bot.withdrawItem(0, 9, 4)
+        const [put, take] = sent.filter(p => p.name === 'item_stack_request').map(p => p.params.requests[0].actions[0])
+        assert.strictEqual(put.destination.slot_type.container_id, id, `into a ${block}`)
+        assert.strictEqual(take.source.slot_type.container_id, id, `out of a ${block}`)
+        for (const req of sent.filter(p => p.name === 'item_stack_request')) assert.doesNotThrow(() => serializer.createPacketBuffer(req))
+      }
+    })
+
     it('depositItem/withdrawItem throw when no container is open', function () {
       const { bot } = makeBot(version)
       bot.currentWindow = null
