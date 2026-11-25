@@ -144,6 +144,60 @@ for (const version of bedrockTestedVersions) {
       assert.ok(slots.some(it => it && it.type === chestId), 'the crafted chest is stored')
     })
 
+    it('craft closes the screen it opened, and closes one left open before opening a table', async function () {
+      this.timeout(10000) // three crafts, with the adapter's pauses between places
+      const { EventEmitter } = require('events')
+      const reg = require('prismarine-registry')('bedrock_' + version)
+      const planksId = reg.itemsByName.oak_planks.id
+      const log = []
+      const bot = new EventEmitter()
+      bot.registry = reg
+      const slots = new Array(46).fill(null)
+      slots[36] = { name: 'oak_planks', type: planksId, count: 64, stackId: 3 }
+      bot.inventory = { slots, items: () => slots.map((it, i) => it && Object.assign({}, it, { slot: i })).filter(Boolean), updateSlot: (i, item) => { slots[i] = item } }
+      bot.currentWindow = null
+      bot._client = new EventEmitter()
+      bot.openInventory = () => { log.push('open inventory'); bot.currentWindow = { id: 1, type: 'inventory' } }
+      bot.openContainer = () => {
+        log.push('open table')
+        bot.currentWindow = { id: 2, type: 'workbench' }
+        setImmediate(() => bot.emit('windowOpen', bot.currentWindow))
+      }
+      bot.closeWindow = (w) => {
+        log.push(`close ${w.type}`)
+        bot.currentWindow = null
+        setImmediate(() => bot._client.emit('container_close', { window_id: w.id }))
+      }
+      bot._client.queue = (name, params) => {
+        if (name !== 'item_stack_request') return
+        const req = params.requests[0]
+        // Places go only into a grid that is open: the 2x2 one with the inventory screen, 32-40 with the table's.
+        const place = req.actions.find(a => a.type_id === 'place')
+        const ok = !place || (place.destination.slot >= 32 ? bot.currentWindow?.type === 'workbench' : bot.currentWindow?.type === 'inventory')
+        setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: req.request_id, status: ok ? 'ok' : 55, containers: [] }] }))
+      }
+      injectCrafting(bot)
+      const p = { name: 'oak_planks', id: planksId, count: 1 }
+      const table = { id: 2001, type: 'shaped', width: 2, height: 2, result: { type: 58, id: 58, count: 1, metadata: 0 }, ingredients: [p, p, p, p], shape: [p, p, p, p], requiresTable: false }
+      await bot.craft(table, 1)
+      assert.deepStrictEqual(log, ['open inventory', 'close inventory'], 'a craft in the bot\'s own grid closes the inventory screen after it')
+      assert.strictEqual(bot.currentWindow, null)
+
+      log.length = 0
+      bot.currentWindow = { id: 1, type: 'inventory' } // left open by someone else
+      const chest = { id: 2002, type: 'shaped', width: 3, height: 3, result: { type: 54, id: 54, count: 1, metadata: 0 }, ingredients: new Array(8).fill(p), shape: [p, p, p, p, null, p, p, p, p], requiresTable: true }
+      await bot.craft(chest, 1, { name: 'crafting_table', position: { x: 0, y: 64, z: 0 } })
+      assert.deepStrictEqual(log, ['close inventory', 'open table', 'close workbench'], 'the open screen goes before the table opens, and the table closes after')
+      assert.strictEqual(bot.currentWindow, null)
+
+      log.length = 0
+      const already = { id: 1, type: 'inventory' }
+      bot.currentWindow = already
+      await bot.craft(table, 1)
+      assert.deepStrictEqual(log, [], 'a screen open before a craft in the bot\'s own grid is left open')
+      assert.strictEqual(bot.currentWindow, already)
+    })
+
     it('craft throws for a table recipe without a table, and for a missing ingredient', async function () {
       const bot = makeBot()
       bot.inventory = { slots: new Array(46).fill(null), items: () => [], updateSlot: () => {} }
