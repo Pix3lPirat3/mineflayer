@@ -9,14 +9,17 @@ const { bedrockTestedVersions } = require('../../lib/version')
 
 // Minimal fake registry: two items by name/id.
 const registry = {
-  itemsByName: { oak_planks: { id: 5 }, crafting_table: { id: 58 }, oak_log: { id: 17 }, stick: { id: 280 } }
+  itemsByName: { oak_planks: { id: 5 }, crafting_table: { id: 58 }, oak_log: { id: 17 }, stick: { id: 280 }, bamboo: { id: 352 } }
 }
 // Map output network ids back to a canonical item for the test.
 const netToItem = { 105: { type: 5, name: 'oak_planks', count: 4 }, 158: { type: 58, name: 'crafting_table', count: 1 } }
 
-function makeBot () {
+// holding: what the bot carries, as [name, count] pairs.
+function makeBot (holding = []) {
   const bot = new EventEmitter()
   bot.registry = registry
+  const items = holding.map(([name, count], slot) => ({ name, type: registry.itemsByName[name]?.id, count, slot }))
+  bot.inventory = { slots: new Array(46).fill(null), items: () => items, updateSlot: () => {} }
   bot._bedrockItemFromNotch = (it) => (it && it.network_id ? netToItem[it.network_id] : null)
   bot._client = new EventEmitter()
   injectCrafting(bot)
@@ -45,7 +48,7 @@ for (const version of bedrockTestedVersions) {
     })
 
     it('recipesFor returns the shapeless planks recipe with its network id and ingredient', function () {
-      const bot = makeBot()
+      const bot = makeBot([['oak_log', 1]])
       bot._client.emit('crafting_data', craftingData)
       const recipes = bot.recipesFor('oak_planks')
       const shapeless = recipes.find(r => r.type === 'shapeless')
@@ -56,7 +59,7 @@ for (const version of bedrockTestedVersions) {
     })
 
     it('derives requiresTable from grid size and filters on it', function () {
-      const bot = makeBot()
+      const bot = makeBot([['oak_planks', 9]])
       bot._client.emit('crafting_data', craftingData)
       const table2x2 = bot.recipesFor('crafting_table').find(r => r.id === 42)
       assert.strictEqual(table2x2.requiresTable, false, '2x2 fits the inventory grid')
@@ -65,6 +68,31 @@ for (const version of bedrockTestedVersions) {
       assert.ok(!withoutTable.includes(99), '3x3 recipe excluded without a table')
       const withTable = bot.recipesFor('oak_planks', null, 1, true).map(r => r.id)
       assert.ok(withTable.includes(99), '3x3 recipe included with a table')
+    })
+
+    it('recipesFor counts every ingredient: an unknown item, an aux value, a tag', function () {
+      // The server lists a stick from "minecraft:bamboo:0" before the one from planks. Its ingredient was not found in the
+      // registry, was skipped when checking what the bot holds, and a bot with planks and no bamboo got it first.
+      const named = (name) => ({ type: 'valid', descriptor_type: 'name', name, count: 1 })
+      const sticks = {
+        shapeless_recipes: [],
+        shaped_recipes: [
+          { recipe_id: 'minecraft:stick_from_bamboo_item', network_id: 7, width: 1, height: 2, input: [named('minecraft:bamboo:0'), named('minecraft:bamboo:0')], output: [{ network_id: 1280, count: 1 }] },
+          { recipe_id: 'minecraft:stick', network_id: 8, width: 1, height: 2, input: [{ type: 'valid', descriptor_type: 'item_tag', tag: 'minecraft:planks', count: 1 }, { type: 'valid', descriptor_type: 'item_tag', tag: 'minecraft:planks', count: 1 }], output: [{ network_id: 1280, count: 4 }] },
+          { recipe_id: 'test:stick_from_nothing', network_id: 9, width: 1, height: 1, input: [named('minecraft:no_such_item')], output: [{ network_id: 1280, count: 1 }] }
+        ]
+      }
+      const withSticks = (holding) => {
+        const bot = makeBot(holding)
+        bot._bedrockItemFromNotch = (it) => (it && it.network_id === 1280 ? { type: 280, name: 'stick', count: it.count } : null)
+        bot._client.emit('crafting_data', sticks)
+        return bot
+      }
+      const ids = (holding) => withSticks(holding).recipesFor('stick').map(r => r.id)
+      assert.deepStrictEqual(ids([['oak_planks', 2]]), [8], 'planks make sticks; no bamboo, and nothing is made of an unknown item')
+      assert.deepStrictEqual(ids([['bamboo', 2]]), [7], 'the aux value is dropped: bamboo is bamboo')
+      assert.deepStrictEqual(ids([['oak_planks', 1]]), [], 'one plank is not enough for a recipe that takes two')
+      assert.deepStrictEqual(withSticks([]).recipesAll('stick').map(r => r.id), [7, 8, 9], 'recipesAll still lists every recipe')
     })
 
     it('craft places the ingredient, sends the verified craft actions, and stores the result', async function () {
