@@ -132,6 +132,23 @@ for (const version of bedrockTestedVersions) {
       assert.strictEqual(bot.inventory.slots[36].count, 15, 'stack shrank by the dropped count')
     })
 
+    it('toss from the main inventory opens the inventory screen for the drop and closes it after', async function () {
+      // The server refuses a drop from a main-inventory slot (status 49) unless the inventory screen is open.
+      const { bot, sent } = makeBot(version)
+      bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
+      bot.inventory.updateSlot(36, { name: 'dirt', type: 3, count: 20, stackId: 9 }) // hotbar slot 0
+      bot.inventory.updateSlot(14, { name: 'iron_ingot', type: 505, count: 8, stackId: 11 }) // main inventory slot 14
+      bot.openInventory = () => { sent.push({ name: 'open inventory' }); bot.currentWindow = { id: 1 } }
+      bot.closeWindow = (w) => { sent.push({ name: 'close inventory' }); bot.currentWindow = null }
+      bot._client.queue = (name, params) => { sent.push({ name, params }); if (name === 'item_stack_request') { const r = params.requests[0]; setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: r.request_id, status: 'ok', containers: [] }] })) } }
+      await bot.toss('iron_ingot', null, 5)
+      assert.deepStrictEqual(sent.map(p => p.name), ['open inventory', 'item_stack_request', 'close inventory'], 'the screen is open for the drop only')
+      assert.strictEqual(sent[1].params.requests[0].actions[0].source.slot_type.container_id, 'inventory')
+      sent.length = 0
+      await bot.toss('dirt', null, 5)
+      assert.deepStrictEqual(sent.map(p => p.name), ['item_stack_request'], 'a drop from the hotbar needs no screen')
+    })
+
     it('equip off-hand sends a normal inventory_transaction into the offhand window (119)', async function () {
       const { bot, sent } = makeBot(version)
       bot.entity = { id: 77, setEquipment () {}, position: { x: 0, y: 64, z: 0 } }
