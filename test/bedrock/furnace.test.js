@@ -52,6 +52,51 @@ for (const version of bedrockTestedVersions) {
       assert.ok(slots.some(it => it && it.type === stoneId), 'the smelted output is stored')
     })
 
+    // A blast furnace and a smoker open a window of their own type, and name only their ingredient slot by their own
+    // container id; fuel and output are furnace_fuel and furnace_output, as in a furnace.
+    for (const [kind, ingredient] of [['blast_furnace', 'blast_furnace_ingredient'], ['smoker', 'smoker_ingredient']]) {
+      it(`a ${kind} window gets the furnace calls, with its own ingredient container id`, async function () {
+        const reg = registryLoader('bedrock_' + version)
+        const coalId = reg.itemsByName.coal?.id ?? 388
+        const rawId = reg.itemsByName.raw_iron?.id ?? 505
+        const sent = []
+        const bot = new EventEmitter()
+        bot.registry = reg
+        const slots = new Array(46).fill(null)
+        slots[36] = { name: 'coal', type: coalId, count: 4, stackId: 7 }
+        slots[37] = { name: 'raw_iron', type: rawId, count: 3, stackId: 8 }
+        bot.inventory = { slots, items: () => slots.map((it, i) => it && Object.assign({}, it, { slot: i })).filter(Boolean), updateSlot: (i, item) => { slots[i] = item } }
+        bot._client = new EventEmitter()
+        bot._client.queue = (name, params) => {
+          sent.push({ name, params })
+          if (name !== 'item_stack_request') return
+          const req = params.requests[0]
+          setImmediate(() => bot._client.emit('item_stack_response', { responses: [{ request_id: req.request_id, status: 'ok', containers: [] }] }))
+        }
+        injectFurnace(bot)
+        const w = Object.assign(new EventEmitter(), { id: 5, type: kind, slots: [] })
+        bot.currentWindow = w
+        bot.emit('windowOpen', w)
+        assert.strictEqual(typeof w.putInput, 'function', 'the window gets putInput')
+        assert.strictEqual(typeof w.takeOutput, 'function', 'the window gets takeOutput')
+
+        await w.putFuel('coal', null, 1)
+        await w.putInput('raw_iron', null, 2)
+        w.slots[0] = { name: 'raw_iron', type: rawId, count: 1, stackId: 30 }
+        await w.takeInput()
+        const actions = sent.filter(s => s.name === 'item_stack_request').map(s => s.params.requests[0].actions[0])
+        assert.strictEqual(actions[0].destination.slot_type.container_id, 'furnace_fuel', 'fuel goes to furnace_fuel')
+        assert.strictEqual(actions[1].destination.slot_type.container_id, ingredient, `input goes to ${ingredient}`)
+        assert.strictEqual(actions[1].destination.slot, 0)
+        assert.strictEqual(actions[2].source.slot_type.container_id, ingredient, `input is taken back from ${ingredient}`)
+
+        // Progress counts up toward 100 ticks here, not a furnace's 200.
+        bot.emit('containerProperty', 5, 0, 50)
+        assert.strictEqual(w.totalProgress, 100)
+        assert.strictEqual(w.progress, 0.5)
+      })
+    }
+
     it('putFuel / putSmeltable throw when the needed item is absent', async function () {
       const bot = new EventEmitter()
       bot.registry = registryLoader('bedrock_' + version)
